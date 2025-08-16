@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import bcrypt from "node_modules/bcryptjs";
+import * as bcrypt from 'bcryptjs';
 import admin from "src/config/firebase.config";
 
 
