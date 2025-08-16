@@ -5,7 +5,6 @@ import * as fs from 'fs';
 
 const serviceAccountPath = path.resolve(__dirname, '../../firebase-adminsdk.json');
 
-// Read and parse the JSON file safely
 const serviceAccount = JSON.parse(
   fs.readFileSync(serviceAccountPath, 'utf8')
 ) as ServiceAccount;

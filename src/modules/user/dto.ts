@@ -6,9 +6,4 @@ export class UpdateUserDto {
   @MinLength(3)
   @MaxLength(20)
   userName?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  bio?: string;
 }
