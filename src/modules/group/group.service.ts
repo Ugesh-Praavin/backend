@@ -3,197 +3,230 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Group } from '../../common/entities/group.entity';
-import { GroupMember } from '../../common/entities/group-member.entity';
-import { GroupMessage } from '../../common/entities/group-message.entity';
-import { GroupType } from '../../common/enums/group-type.enum';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { GroupType } from '../../common/enums/group-type.enum';
+import { db } from 'src/config/firebase.config';
 
 @Injectable()
 export class GroupService {
-  constructor(
-    @InjectRepository(Group)
-    private groupRepository: Repository<Group>,
-    @InjectRepository(GroupMember)
-    private groupMemberRepository: Repository<GroupMember>,
-    @InjectRepository(GroupMessage)
-    private groupMessageRepository: Repository<GroupMessage>,
-  ) {}
+  private groupCollection = db.collection('groups');
+  private memberCollection = db.collection('group_members');
+  private messageCollection = db.collection('group_messages');
 
-  async createGroup(createGroupDto: CreateGroupDto): Promise<Group> {
+  async createGroup(createGroupDto: CreateGroupDto): Promise<any> {
     const expiresAt = createGroupDto.expires_in_hours
-      ? new Date(Date.now() + createGroupDto.expires_in_hours * 60 * 60 * 1000)
+      ? new Date(Date.now() + createGroupDto.expires_in_hours * 3600000)
       : null;
 
-    const group = this.groupRepository.create({
+    const groupData = {
       ...createGroupDto,
-      expires_at: expiresAt ?? undefined,
-    });
+      expires_at: expiresAt ?? null,
+      is_active: true,
+      member_count: 0,
+      created_at: new Date(),
+    };
 
-    return await this.groupRepository.save(group);
+    const docRef = await this.groupCollection.add(groupData);
+    const snapshot = await docRef.get();
+    return { id: docRef.id, ...snapshot.data() };
   }
 
-  async getOrCreateMoodGroup(moodType: string): Promise<Group> {
+  async getOrCreateMoodGroup(moodType: string): Promise<any> {
     const groupName = `Feeling ${moodType.charAt(0).toUpperCase() + moodType.slice(1)}`;
 
-    let group = await this.groupRepository.findOne({
-      where: {
-        name: groupName,
-        type: GroupType.MOOD_BASED,
-        is_active: true,
-      },
-    });
+    const query = await this.groupCollection
+      .where('name', '==', groupName)
+      .where('type', '==', GroupType.MOOD_BASED)
+      .where('is_active', '==', true)
+      .limit(1)
+      .get();
 
-    if (!group) {
-      group = await this.createGroup({
-        name: groupName,
-        description: `Support group for people feeling ${moodType}`,
-        type: GroupType.MOOD_BASED,
-        expires_in_hours: 24,
-      });
+    if (!query.empty) {
+      const doc = query.docs[0];
+      return { id: doc.id, ...doc.data() };
     }
 
-    return group;
+    return this.createGroup({
+      name: groupName,
+      description: `Support group for people feeling ${moodType}`,
+      type: GroupType.MOOD_BASED,
+      expires_in_hours: 24,
+    });
   }
 
-  async joinGroup(userId: number, joinGroupDto: JoinGroupDto): Promise<GroupMember> {
-    const { group_id } = joinGroupDto;
+  async joinGroup(userId: string, joinGroupDto: JoinGroupDto): Promise<any> {
+    const groupId = joinGroupDto.group_id;
 
-    const group = await this.groupRepository.findOne({
-      where: { id: group_id, is_active: true },
-    });
-
-    if (!group) {
+    const groupSnap = await this.groupCollection.doc(String(groupId)).get();
+    if (!groupSnap.exists || !groupSnap.data()?.is_active) {
       throw new NotFoundException('Group not found');
     }
 
-    const existingMember = await this.groupMemberRepository.findOne({
-      where: { group_id, user_id: userId, is_active: true },
-    });
+    const existingQuery = await this.memberCollection
+      .where('group_id', '==', groupId)
+      .where('user_id', '==', userId)
+      .where('is_active', '==', true)
+      .limit(1)
+      .get();
 
-    if (existingMember) {
-      return existingMember;
+    if (!existingQuery.empty) {
+      const doc = existingQuery.docs[0];
+      return { id: doc.id, ...doc.data() };
     }
 
-    const memberCount = await this.groupMemberRepository.count({
-      where: { group_id, is_active: true },
-    });
-    const anonymousName = `Anonymous ${memberCount + 1}`;
+    const memberCountQuery = await this.memberCollection
+      .where('group_id', '==', groupId)
+      .where('is_active', '==', true)
+      .get();
 
-    const member = this.groupMemberRepository.create({
-      group_id,
+    const anonymousName = `Anonymous ${memberCountQuery.size + 1}`;
+
+    const memberData = {
+      group_id: groupId,
       user_id: userId,
       anonymous_name: anonymousName,
+      is_active: true,
+      joined_at: new Date(),
+    };
+
+    const memberRef = await this.memberCollection.add(memberData);
+    await this.groupCollection.doc(String(groupId)).update({
+      member_count: (groupSnap.data()?.member_count || 0) + 1,
     });
 
-    const savedMember = await this.groupMemberRepository.save(member);
-
-    await this.groupRepository.increment({ id: group_id }, 'member_count', 1);
-
-    return savedMember;
+    const snapshot = await memberRef.get();
+    return { id: memberRef.id, ...snapshot.data() };
   }
 
-  async autoJoinMoodGroup(userId: number, moodType: string): Promise<GroupMember> {
+  async autoJoinMoodGroup(userId: string, moodType: string): Promise<any> {
     const group = await this.getOrCreateMoodGroup(moodType);
-    return await this.joinGroup(userId, { group_id: group.id });
+    return this.joinGroup(userId, { group_id: group.id });
   }
 
-  async sendMessage(userId: number, sendMessageDto: SendMessageDto): Promise<GroupMessage> {
+  async sendMessage(userId: string, sendMessageDto: SendMessageDto): Promise<any> {
     const { group_id, message } = sendMessageDto;
 
-    const member = await this.groupMemberRepository.findOne({
-      where: { group_id, user_id: userId, is_active: true },
-    });
+    const memberQuery = await this.memberCollection
+      .where('group_id', '==', group_id)
+      .where('user_id', '==', userId)
+      .where('is_active', '==', true)
+      .limit(1)
+      .get();
 
-    if (!member) {
+    if (memberQuery.empty) {
       throw new BadRequestException('You are not a member of this group');
     }
 
-    const groupMessage = this.groupMessageRepository.create({
+    const member = memberQuery.docs[0].data();
+
+    const messageData = {
       group_id,
       user_id: userId,
       anonymous_sender: member.anonymous_name,
       message,
-    });
+      is_active: true,
+      created_at: new Date(),
+    };
 
-    return await this.groupMessageRepository.save(groupMessage);
+    const msgRef = await this.messageCollection.add(messageData);
+    const snapshot = await msgRef.get();
+    return { id: msgRef.id, ...snapshot.data() };
   }
 
-  async getGroupChat(userId: number, groupId: number): Promise<any> {
-    const member = await this.groupMemberRepository.findOne({
-      where: { group_id: groupId, user_id: userId, is_active: true },
-    });
+  async getGroupChat(userId: string, groupId: string): Promise<any> {
+    const memberQuery = await this.memberCollection
+      .where('group_id', '==', groupId)
+      .where('user_id', '==', userId)
+      .where('is_active', '==', true)
+      .limit(1)
+      .get();
 
-    if (!member) {
+    if (memberQuery.empty) {
       throw new BadRequestException('You are not a member of this group');
     }
 
-    const group = await this.groupRepository.findOne({
-      where: { id: groupId, is_active: true },
-    });
+    const member = memberQuery.docs[0].data();
 
-    const messages = await this.groupMessageRepository.find({
-      where: { group_id: groupId, is_active: true },
-      order: { created_at: 'DESC' },
-      take: 50,
-    });
+    const groupSnap = await this.groupCollection.doc(groupId).get();
+    if (!groupSnap.exists || !groupSnap.data()?.is_active) {
+      throw new NotFoundException('Group not found');
+    }
+
+    const messagesQuery = await this.messageCollection
+      .where('group_id', '==', groupId)
+      .where('is_active', '==', true)
+      .orderBy('created_at', 'desc')
+      .limit(50)
+      .get();
+
+    const messages = messagesQuery.docs.map((doc) => doc.data()).reverse();
 
     return {
-      group,
-      messages: messages.reverse(),
+      group: groupSnap.data(),
+      messages,
       my_anonymous_name: member.anonymous_name,
     };
   }
 
-  async getAvailableGroups(): Promise<Group[]> {
-    return await this.groupRepository.find({
-      where: { is_active: true },
-      order: { member_count: 'DESC' },
-    });
+  async getAvailableGroups(): Promise<any[]> {
+    const query = await this.groupCollection
+      .where('is_active', '==', true)
+      .orderBy('member_count', 'desc')
+      .get();
+
+    return query.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   }
 
-  async getUserGroups(userId: number): Promise<Group[]> {
-    const memberGroups = await this.groupMemberRepository.find({
-      where: { user_id: userId, is_active: true },
-      relations: ['group'],
-    });
+  async getUserGroups(userId: string): Promise<any[]> {
+    const memberQuery = await this.memberCollection
+      .where('user_id', '==', userId)
+      .where('is_active', '==', true)
+      .get();
 
-    return memberGroups.map((member) => member.group);
+    const groupIds = memberQuery.docs.map((doc) => doc.data().group_id);
+    const groupFetches = groupIds.map((id) => this.groupCollection.doc(id).get());
+    const groupSnaps = await Promise.all(groupFetches);
+
+    return groupSnaps
+      .filter((snap) => snap.exists)
+      .map((snap) => ({ id: snap.id, ...snap.data() }));
   }
 
-  async leaveGroup(userId: number, groupId: number): Promise<void> {
-    const member = await this.groupMemberRepository.findOne({
-      where: { group_id: groupId, user_id: userId, is_active: true },
-    });
+  async leaveGroup(userId: string, groupId: string): Promise<void> {
+    const memberQuery = await this.memberCollection
+      .where('group_id', '==', groupId)
+      .where('user_id', '==', userId)
+      .where('is_active', '==', true)
+      .limit(1)
+      .get();
 
-    if (member) {
-      member.is_active = false;
-      await this.groupMemberRepository.save(member);
+    if (!memberQuery.empty) {
+      const memberRef = memberQuery.docs[0].ref;
+      await memberRef.update({ is_active: false });
 
-      await this.groupRepository.decrement({ id: groupId }, 'member_count', 1);
+      const groupSnap = await this.groupCollection.doc(groupId).get();
+      const currentCount = groupSnap.data()?.member_count || 1;
+      await this.groupCollection.doc(String(groupId)).update({
+        member_count: Math.max(currentCount - 1, 0),
+      });
     }
   }
 
-  
-  async listenToGroupMessages(groupId: number): Promise<GroupMessage[]> {
-    const group = await this.groupRepository.findOne({
-      where: { id: groupId, is_active: true },
-    });
-
-    if (!group) {
+  async listenToGroupMessages(groupId: string): Promise<any[]> {
+    const groupSnap = await this.groupCollection.doc(groupId).get();
+    if (!groupSnap.exists || !groupSnap.data()?.is_active) {
       throw new NotFoundException('Group not found or inactive');
     }
 
-    const messages = await this.groupMessageRepository.find({
-      where: { group_id: groupId, is_active: true },
-      order: { created_at: 'DESC' },
-      take: 50,
-    });
+    const messagesQuery = await this.messageCollection
+      .where('group_id', '==', groupId)
+      .where('is_active', '==', true)
+      .orderBy('created_at', 'desc')
+      .limit(50)
+      .get();
 
-    return messages.reverse();
+    return messagesQuery.docs.map((doc) => doc.data()).reverse();
   }
 }

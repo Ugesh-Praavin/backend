@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import admin from 'src/config/firebase.config';
+import { admin } from 'src/config/firebase.config';
 
 @Injectable()
 export class UserService {

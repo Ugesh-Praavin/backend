@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, BadRequestException } from "@nestjs/common";
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
-import admin from "src/config/firebase.config";
+import { admin } from "src/config/firebase.config";
 
 @Injectable()
 export class AuthService {

@@ -45,7 +45,7 @@ export class GroupGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.join(roomName);
     
     // Fetch latest group messages and emit them to the client
-    const messages = await this.groupService.listenToGroupMessages(Number(data.groupId));
+    const messages = await this.groupService.listenToGroupMessages(String(data.groupId));
     messages.forEach((newMessage) => {
       this.server.to(roomName).emit('newGroupMessage', {
         id: newMessage.id,
@@ -86,7 +86,7 @@ export class GroupGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     try {
       // Save message to Firestore (this will trigger the real-time listener)
-      await this.groupService.sendMessage(Number(data.userId), {
+      await this.groupService.sendMessage(String(data.userId), {
         group_id: Number(data.groupId),
         message: data.message,
       });
