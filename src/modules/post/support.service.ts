@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { db } from 'src/config/firebase.config';
+import { db, admin } from 'src/config/firebase.config';
+import { PostData, SupportData } from '../../common/types/post.types';
 
 @Injectable()
 export class SupportService {
@@ -16,6 +17,10 @@ export class SupportService {
       }
 
       const postData = postDoc.data();
+      if (!postData) {
+        throw new NotFoundException('Post data not found');
+      }
+      
       if (postData.status !== 'active') {
         throw new BadRequestException('Cannot support inactive post');
       }
@@ -106,8 +111,8 @@ export class SupportService {
 
       const stats = {
         total: supportSnapshot.docs.length,
-        by_type: {},
-        recent_support: []
+        by_type: {} as Record<string, number>,
+        recent_support: [] as Array<{ type: string; message: string; created_at: any }>
       };
 
       supportSnapshot.docs.forEach(doc => {
@@ -148,14 +153,14 @@ export class SupportService {
         .offset((page - 1) * limit)
         .get();
 
-      const supports = [];
+      const supports: SupportData[] = [];
       for (const doc of snapshot.docs) {
         const supportData = doc.data();
         supports.push({
           id: doc.id,
           ...supportData,
           created_at: supportData.created_at.toISOString()
-        });
+        } as SupportData);
       }
 
       return {
@@ -183,7 +188,22 @@ export class SupportService {
         .offset((page - 1) * limit)
         .get();
 
-      const supportedPosts = [];
+      const supportedPosts: Array<{
+        support_id: string;
+        support_type: string;
+        support_message: string;
+        support_date: string;
+        post: {
+          id: string;
+          content: string;
+          mood: string;
+          category: string;
+          created_at: string;
+          support_count: number;
+          comments_count: number;
+        };
+      }> = [];
+      
       for (const doc of supportSnapshot.docs) {
         const supportData = doc.data();
         
@@ -191,21 +211,23 @@ export class SupportService {
         const postDoc = await this.postsCollection.doc(supportData.post_id).get();
         if (postDoc.exists) {
           const postData = postDoc.data();
-          supportedPosts.push({
-            support_id: doc.id,
-            support_type: supportData.support_type,
-            support_message: supportData.message,
-            support_date: supportData.created_at.toISOString(),
-            post: {
-              id: postData.id,
-              content: postData.content,
-              mood: postData.mood,
-              category: postData.category,
-              created_at: postData.created_at.toISOString(),
-              support_count: postData.support_count,
-              comments_count: postData.comments_count
-            }
-          });
+          if (postData) {
+            supportedPosts.push({
+              support_id: doc.id,
+              support_type: supportData.support_type,
+              support_message: supportData.message,
+              support_date: supportData.created_at.toISOString(),
+              post: {
+                id: postData.id,
+                content: postData.content,
+                mood: postData.mood,
+                category: postData.category,
+                created_at: postData.created_at.toISOString(),
+                support_count: postData.support_count,
+                comments_count: postData.comments_count
+              }
+            });
+          }
         }
       }
 
@@ -243,7 +265,7 @@ export class SupportService {
 
       // Sort by count
       const trendingTypes = Object.entries(typeCounts)
-        .sort(([,a], [,b]) => b - a)
+        .sort(([,a], [,b]) => (b as number) - (a as number))
         .slice(0, 10)
         .map(([type, count]) => ({ type, count }));
 

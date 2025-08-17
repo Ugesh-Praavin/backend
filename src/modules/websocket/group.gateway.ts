@@ -87,7 +87,7 @@ export class GroupGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       // Save message to Firestore (this will trigger the real-time listener)
       await this.groupService.sendMessage(String(data.userId), {
-        group_id: Number(data.groupId),
+        group_id: String(data.groupId),
         message: data.message,
       });
 

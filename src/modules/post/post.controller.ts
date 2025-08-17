@@ -1,22 +1,12 @@
-import { 
-  Controller, 
-  Get, 
-  Post, 
-  Put, 
-  Delete, 
-  Body, 
-  Param, 
-  Query, 
-  UseGuards, 
-  Request 
-} from '@nestjs/common';
-import { JwtAuthGuard } from '../../common/guards/auth.guard';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, Request, UseGuards } from '@nestjs/common';
 import { PostService } from './post.service';
 import { CommentService } from './comment.service';
 import { SupportService } from './support.service';
+import { JwtAuthGuard } from '../../common/guards/auth.guard';
 import { CreatePostDto } from './dto/create-post.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { SupportPostDto } from './dto/support-post.dto';
+import { PostData, CommentData, SupportData } from '../../common/types/post.types';
 
 @Controller('posts')
 @UseGuards(JwtAuthGuard)
@@ -186,7 +176,7 @@ export class PostController {
     
     const totalPosts = myPosts.total;
     const totalSupportGiven = mySupport.total;
-    const totalComments = myPosts.posts.reduce((sum, post) => sum + (post.comments_count || 0), 0);
+    const totalComments = myPosts.posts.reduce((sum, post: any) => sum + (post.comments_count || 0), 0);
     
     return {
       user_id: req.user.uid,

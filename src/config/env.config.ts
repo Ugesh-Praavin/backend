@@ -4,7 +4,7 @@ export const envConfig = {
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
   
   // Server Configuration
-  PORT: parseInt(process.env.PORT) || 5000,
+  PORT: parseInt(process.env.PORT || '5000') || 5000,
   HOST: process.env.HOST || '0.0.0.0',
   
   // Firebase Configuration

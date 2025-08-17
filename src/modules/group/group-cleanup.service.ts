@@ -1,18 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
-import { db } from 'src/config/firebase.config';
+// import { Cron, CronExpression } from '@nestjs/schedule';
+import { admin } from 'src/config/firebase.config';
 
 @Injectable()
 export class GroupCleanupService {
   private readonly logger = new Logger(GroupCleanupService.name);
-  private readonly groupCollection = db.collection('groups');
-  private readonly memberCollection = db.collection('group_members');
-  private readonly messageCollection = db.collection('group_messages');
+  private readonly groupCollection = admin.firestore().collection('groups');
+  private readonly memberCollection = admin.firestore().collection('group_members');
+  private readonly messageCollection = admin.firestore().collection('group_messages');
 
-  /**
-   * Run cleanup every hour to check for expired groups
-   */
-  @Cron(CronExpression.EVERY_HOUR)
+  
   async cleanupExpiredGroups() {
     this.logger.log('🕐 Starting expired groups cleanup...');
     
@@ -41,6 +38,38 @@ export class GroupCleanupService {
       this.logger.log('✅ Expired groups cleanup completed successfully');
     } catch (error) {
       this.logger.error('❌ Error during expired groups cleanup:', error);
+    }
+  }
+
+  async cleanupExpiredGroupsAtNoon() {
+    this.logger.log('🕛 Starting 12 PM expired groups cleanup...');
+    
+    try {
+      const now = new Date();
+      const noon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+      
+      // Find all groups that expired before or at 12 PM today
+      const expiredGroupsQuery = await this.groupCollection
+        .where('expires_at', '<=', noon)
+        .where('is_active', '==', true)
+        .get();
+
+      if (expiredGroupsQuery.empty) {
+        this.logger.log('✅ No groups expired by 12 PM today');
+        return;
+      }
+
+      this.logger.log(`🗑️ Found ${expiredGroupsQuery.size} groups expired by 12 PM to cleanup`);
+
+      // Process each expired group
+      for (const groupDoc of expiredGroupsQuery.docs) {
+        const groupId = groupDoc.id;
+        await this.cleanupGroup(groupId);
+      }
+
+      this.logger.log('✅ 12 PM expired groups cleanup completed successfully');
+    } catch (error) {
+      this.logger.error('❌ Error during 12 PM expired groups cleanup:', error);
     }
   }
 
@@ -120,6 +149,98 @@ export class GroupCleanupService {
       return { deletedGroups, deletedMessages, deletedMembers };
     } catch (error) {
       this.logger.error('❌ Error during manual cleanup:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Manually trigger 12 PM cleanup (for testing or immediate execution)
+   */
+  async triggerNoonCleanup(): Promise<{ deletedGroups: number; deletedMessages: number; deletedMembers: number }> {
+    this.logger.log('🔧 Manual 12 PM cleanup triggered');
+    await this.cleanupExpiredGroupsAtNoon();
+    // Return default values since cleanupExpiredGroupsAtNoon doesn't return stats
+    return { deletedGroups: 0, deletedMessages: 0, deletedMembers: 0 };
+  }
+
+  async checkGroupsForNoonCleanup(): Promise<{
+    groupsToCleanup: Array<{
+      id: string;
+      name: string;
+      expires_at: any;
+      member_count: number;
+      message_count: number;
+    }>;
+    totalGroups: number;
+    totalMembers: number;
+    totalMessages: number;
+  }> {
+    try {
+      const now = new Date();
+      const noon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+      
+      // Find all groups that will expire by 12 PM today
+      const expiredGroupsQuery = await this.groupCollection
+        .where('expires_at', '<=', noon)
+        .where('is_active', '==', true)
+        .get();
+
+      if (expiredGroupsQuery.empty) {
+        return {
+          groupsToCleanup: [],
+          totalGroups: 0,
+          totalMembers: 0,
+          totalMessages: 0
+        };
+      }
+
+      const groupsToCleanup: Array<{
+        id: string;
+        name: string;
+        expires_at: any;
+        member_count: number;
+        message_count: number;
+      }> = [];
+      let totalMembers = 0;
+      let totalMessages = 0;
+
+      // Get details for each group that will be cleaned up
+      for (const groupDoc of expiredGroupsQuery.docs) {
+        const groupData = groupDoc.data();
+        
+        // Count members
+        const membersQuery = await this.memberCollection
+          .where('group_id', '==', groupDoc.id)
+          .get();
+        
+        // Count messages
+        const messagesQuery = await this.messageCollection
+          .where('group_id', '==', groupDoc.id)
+          .get();
+
+        const memberCount = membersQuery.size;
+        const messageCount = messagesQuery.size;
+        
+        totalMembers += memberCount;
+        totalMessages += messageCount;
+
+        groupsToCleanup.push({
+          id: groupDoc.id,
+          name: groupData.name || 'Unnamed Group',
+          expires_at: groupData.expires_at,
+          member_count: memberCount,
+          message_count: messageCount
+        });
+      }
+
+      return {
+        groupsToCleanup,
+        totalGroups: groupsToCleanup.length,
+        totalMembers,
+        totalMessages
+      };
+    } catch (error) {
+      this.logger.error('❌ Error checking groups for noon cleanup:', error);
       throw error;
     }
   }

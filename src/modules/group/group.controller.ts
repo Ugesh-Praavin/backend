@@ -88,6 +88,26 @@ export class GroupController {
     };
   }
 
+  // Manually trigger 12 PM cleanup (for testing)
+  @Post('cleanup/noon')
+  async triggerNoonCleanup() {
+    const result = await this.groupCleanupService.triggerNoonCleanup();
+    return {
+      message: '12 PM cleanup triggered successfully',
+      ...result
+    };
+  }
+
+  // Check which groups will be cleaned up at 12 PM today
+  @Get('cleanup/noon/check')
+  async checkNoonCleanup() {
+    const result = await this.groupCleanupService.checkGroupsForNoonCleanup();
+    return {
+      message: '12 PM cleanup check completed',
+      ...result
+    };
+  }
+
   // Get cleanup statistics
   @Get('cleanup/stats')
   async getCleanupStats() {

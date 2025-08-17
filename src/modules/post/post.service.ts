@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { db } from 'src/config/firebase.config';
+import { PostData, CommentData, SupportData } from '../../common/types/post.types';
 
 @Injectable()
 export class PostService {
@@ -7,9 +8,7 @@ export class PostService {
   private readonly commentsCollection = db.collection('post_comments');
   private readonly supportCollection = db.collection('post_support');
 
-  /**
-   * Create a new post
-   */
+  
   async createPost(userId: string, createPostDto: any) {
     try {
       const now = new Date();
@@ -57,7 +56,7 @@ export class PostService {
 
       const snapshot = await query.limit(limit).offset((page - 1) * limit).get();
       
-      const posts = [];
+      const posts: PostData[] = [];
       for (const doc of snapshot.docs) {
         const postData = doc.data();
         posts.push({
@@ -65,7 +64,7 @@ export class PostService {
           ...postData,
           created_at: postData.created_at.toISOString(),
           updated_at: postData.updated_at.toISOString()
-        });
+        } as PostData);
       }
 
       return {
@@ -92,6 +91,9 @@ export class PostService {
       }
 
       const postData = postDoc.data();
+      if (!postData) {
+        throw new NotFoundException('Post data not found');
+      }
       
       // Get comments for this post
       const commentsSnapshot = await this.commentsCollection
@@ -101,14 +103,14 @@ export class PostService {
         .limit(50)
         .get();
 
-      const comments = [];
+      const comments: CommentData[] = [];
       for (const doc of commentsSnapshot.docs) {
         const commentData = doc.data();
         comments.push({
           id: doc.id,
           ...commentData,
           created_at: commentData.created_at.toISOString()
-        });
+        } as CommentData);
       }
 
       // Get support statistics
@@ -148,6 +150,10 @@ export class PostService {
       }
 
       const postData = postDoc.data();
+      if (!postData) {
+        throw new NotFoundException('Post data not found');
+      }
+      
       if (postData.author_id !== userId) {
         throw new BadRequestException('You can only edit your own posts');
       }
@@ -184,6 +190,10 @@ export class PostService {
       }
 
       const postData = postDoc.data();
+      if (!postData) {
+        throw new NotFoundException('Post data not found');
+      }
+      
       if (postData.author_id !== userId) {
         throw new BadRequestException('You can only delete your own posts');
       }
@@ -216,7 +226,7 @@ export class PostService {
         .offset((page - 1) * limit)
         .get();
 
-      const posts = [];
+      const posts: PostData[] = [];
       for (const doc of snapshot.docs) {
         const postData = doc.data();
         posts.push({
@@ -224,7 +234,7 @@ export class PostService {
           ...postData,
           created_at: postData.created_at.toISOString(),
           updated_at: postData.updated_at.toISOString()
-        });
+        } as PostData);
       }
 
       return {
@@ -246,8 +256,8 @@ export class PostService {
   private calculateSupportStats(supportDocs: any[]) {
     const stats = {
       total: supportDocs.length,
-      by_type: {},
-      recent_support: []
+      by_type: {} as Record<string, number>,
+      recent_support: [] as Array<{ type: string; message: string; created_at: any }>
     };
 
     supportDocs.forEach(doc => {
@@ -285,7 +295,7 @@ export class PostService {
         .limit(100) // Get more posts to filter
         .get();
 
-      const posts = [];
+      const posts: PostData[] = [];
       const queryLower = query.toLowerCase();
 
       for (const doc of snapshot.docs) {
@@ -306,7 +316,7 @@ export class PostService {
             ...postData,
             created_at: postData.created_at.toISOString(),
             updated_at: postData.updated_at.toISOString()
-          });
+          } as PostData);
         }
 
         // Stop if we have enough posts

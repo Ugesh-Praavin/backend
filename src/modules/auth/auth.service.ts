@@ -1,73 +1,95 @@
-import { Injectable, UnauthorizedException, BadRequestException } from "@nestjs/common";
+import { Injectable, UnauthorizedException, BadRequestException, InternalServerErrorException } from "@nestjs/common";
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
-import { admin } from "src/config/firebase.config";
+import { admin } from 'src/config/firebase.config';
 import { envConfig } from "src/config/env.config";
 
 @Injectable()
 export class AuthService {
-    // Simple in-memory store for revoked tokens (in production, use Redis or database)
+
     private revokedTokens: Set<string> = new Set();
     
     private readonly jwtSecret = envConfig.JWT_SECRET;
     private readonly jwtExpiresIn = envConfig.JWT_EXPIRES_IN;
 
     async register(userName: string, password: string, customUid?: string) {
-        try {
-            // 🔹 Check if username already exists
-            const existingUser = await admin.firestore()
-                .collection('users')
-                .where('userName', '==', userName)
-                .limit(1)
-                .get();
+  try {
+    const existingUser = await admin.firestore()
+      .collection('users')
+      .where('userName', '==', userName)
+      .limit(1)
+      .get();
 
-            if (!existingUser.empty) {
-                throw new BadRequestException('Username already taken');
-            }
-
-            // Generate UID
-            const uid = customUid || admin.firestore().collection("users").doc().id;
-
-            // Hash password
-            const hashedPassword = await bcrypt.hash(password, 10);
-
-            const now = admin.firestore.FieldValue.serverTimestamp();
-            const todayString = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-
-            await admin.firestore().collection('users').doc(uid).set({
-                userName,
-                password: hashedPassword,
-                createdAt: now,
-                first_login_date: now,        // First time user logged in
-                last_login_date: now,         // Most recent login
-                login_dates: [now],           
-                unique_dates: [todayString],  // Array of unique calendar dates
-                currentStreak: 1,
-                longestStreak: 1,
-                totalLoginDays: 1,
-                total_logins: 1              // Track total number of logins
-            });
-
-            // Create session token
-            const sessionToken = this.generateSessionToken(uid, userName);
-
-            return { 
-                uid, 
-                userName,
-                sessionToken,
-                currentStreak: 1,
-                longestStreak: 1,
-                first_login_date: now,
-                last_login_date: now,
-                login_dates: [now]
-            };
-        } catch (error) {
-            console.error("Error creating user:", error);
-            throw error instanceof BadRequestException 
-                ? error 
-                : new BadRequestException("User registration failed");
-        }
+    if (!existingUser.empty) {
+      throw new BadRequestException('Username already taken');
     }
+
+    // Sanitize customUid
+    const uid = customUid && customUid.trim() !== ""
+      ? customUid
+      : admin.firestore().collection("users").doc().id;
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Timestamps
+    const now = admin.firestore.FieldValue.serverTimestamp(); 
+    const nowDate = new Date(); 
+    const todayString = nowDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+    // Firestore write block
+    try {
+      await admin.firestore().collection('users').doc(uid).set({
+        userName,
+        password: hashedPassword,
+        createdAt: now,
+        first_login_date: now,
+        last_login_date: now,
+        login_dates: [nowDate],         // ✅ Use Date object here
+        unique_dates: [todayString],
+        currentStreak: 1,
+        longestStreak: 1,
+        totalLoginDays: 1,
+        total_logins: 1
+      });
+    } catch (firestoreError) {
+      console.error("🔥 Firestore write failed:", {
+        message: firestoreError.message,
+        stack: firestoreError.stack,
+        code: firestoreError.code,
+        details: firestoreError.details,
+      });
+      throw new InternalServerErrorException("Database write failed");
+    }
+
+    // Create session token
+    const sessionToken = this.generateSessionToken(uid, userName);
+
+    return {
+      success: true,
+      uid,
+      userName,
+      sessionToken,
+      metadata: {
+        createdAt: nowDate,
+        loginStats: {
+          currentStreak: 1,
+          longestStreak: 1,
+          totalLogins: 1,
+        }
+      }
+    };
+  } catch (error) {
+    console.error("❌ Registration error:", {
+      message: error.message,
+      stack: error.stack,
+    });
+
+    throw error instanceof BadRequestException
+      ? error
+      : new BadRequestException("User registration failed");
+  }
+}
 
     async login(userName: string, password: string) {
         try {
@@ -128,7 +150,8 @@ export class AuthService {
 
     private generateSessionToken(uid: string, userName: string): string {
         const payload = { uid, userName };
-        return jwt.sign(payload, this.jwtSecret, { expiresIn: this.jwtExpiresIn });
+        // Use any type to bypass JWT type conflicts
+        return (jwt as any).sign(payload, this.jwtSecret, { expiresIn: this.jwtExpiresIn });
     }
 
     async validateSessionToken(token: string): Promise<any> {
@@ -147,66 +170,81 @@ export class AuthService {
         }
     }
 
-    private async updateUserStreak(uid: string, userData: any) {
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+   private async updateUserStreak(uid: string, userData: any) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-        // Firestore Timestamp check - use new field name
-        const lastLoginDateRaw = userData.last_login_date?.toDate?.() || userData.last_login_date || new Date(0);
-        const lastLoginDay = new Date(lastLoginDateRaw.getFullYear(), lastLoginDateRaw.getMonth(), lastLoginDateRaw.getDate());
+  // Normalize last login date
+  const lastLoginDateRaw =
+    userData.last_login_date?.toDate?.() ||
+    userData.last_login_date ||
+    new Date(0);
+  const lastLoginDay = new Date(
+    lastLoginDateRaw.getFullYear(),
+    lastLoginDateRaw.getMonth(),
+    lastLoginDateRaw.getDate()
+  );
 
-        const daysDifference = Math.floor((today.getTime() - lastLoginDay.getTime()) / (1000 * 60 * 60 * 24));
+  const daysDifference = Math.floor(
+    (today.getTime() - lastLoginDay.getTime()) / (1000 * 60 * 60 * 24)
+  );
 
-        let currentStreak = userData.currentStreak || 0;
-        let longestStreak = userData.longestStreak || 0;
-        let totalLoginDays = userData.totalLoginDays || 0;
-        let totalLogins = userData.total_logins || 0;
+  let currentStreak = userData.currentStreak || 0;
+  let longestStreak = userData.longestStreak || 0;
+  let totalLoginDays = userData.totalLoginDays || 0;
+  let totalLogins = userData.total_logins || 0;
 
-        // Get existing login dates array or initialize empty
-        let loginDates = userData.login_dates || [];
-        
-        // Add current login date to the array
-        loginDates.push(admin.firestore.FieldValue.serverTimestamp());
+  // ✅ Safely convert all old values to JS Dates
+  let loginDates: Date[] = (userData.login_dates || []).map((d: any) =>
+    d?.toDate ? d.toDate() : new Date(d)
+  );
 
-        // Get unique dates array (for calendar display)
-        let uniqueDates = userData.unique_dates || [];
-        const todayString = today.toISOString().split('T')[0]; // YYYY-MM-DD format
-        
-        // Check if today is already in unique dates
-        const todayExists = uniqueDates.some((dateStr: string) => dateStr === todayString);
-        
-        if (!todayExists) {
-            // Add today as a unique date
-            uniqueDates.push(todayString);
-        }
+  // ✅ push new JS Date, not FieldValue
+  loginDates.push(now);
 
-        if (daysDifference === 0) {
-            // Same day login - just increment total logins
-            totalLogins += 1;
-        } else if (daysDifference === 1) {
-            currentStreak += 1;
-            totalLoginDays += 1;
-            totalLogins += 1;
-            if (currentStreak > longestStreak) longestStreak = currentStreak;
-        } else if (daysDifference > 1) {
-            currentStreak = 1;
-            totalLoginDays += 1;
-            totalLogins += 1;
-        }
+  // Unique dates
+  let uniqueDates = userData.unique_dates || [];
+  const todayString = today.toISOString().split("T")[0];
+  if (!uniqueDates.includes(todayString)) {
+    uniqueDates.push(todayString);
+  }
 
-        const updatedData = {
-            last_login_date: admin.firestore.FieldValue.serverTimestamp(),
-            login_dates: loginDates,  // Update the login dates array
-            unique_dates: uniqueDates, // Update the unique dates array
-            currentStreak,
-            longestStreak,
-            totalLoginDays,
-            total_logins: totalLogins
-        };
+  // Update streak
+  if (daysDifference === 0) {
+    totalLogins += 1;
+  } else if (daysDifference === 1) {
+    currentStreak += 1;
+    totalLoginDays += 1;
+    totalLogins += 1;
+    longestStreak = Math.max(longestStreak, currentStreak);
+  } else if (daysDifference > 1) {
+    currentStreak = 1;
+    totalLoginDays += 1;
+    totalLogins += 1;
+  }
 
-        await admin.firestore().collection('users').doc(uid).update(updatedData);
-        return updatedData;
-    }
+  const updatedData = {
+    last_login_date: admin.firestore.FieldValue.serverTimestamp(), // ✅ only here
+    login_dates: loginDates, // ✅ array of plain Dates
+    unique_dates: uniqueDates,
+    currentStreak,
+    longestStreak,
+    totalLoginDays,
+    total_logins: totalLogins
+  };
+
+  await admin.firestore().collection("users").doc(uid).update(updatedData);
+
+  return {
+    currentStreak,
+    longestStreak,
+    last_login_date: now,
+    login_dates: loginDates,
+    totalLoginDays,
+    total_logins: totalLogins
+  };
+}
+
 
     async getUserStreak(uid: string) {
         const userDoc = await admin.firestore().collection('users').doc(uid).get();
@@ -436,5 +474,19 @@ export class AuthService {
     async refreshToken(oldToken: string): Promise<string> {
         const decoded: any = await this.validateSessionToken(oldToken);
         return this.generateSessionToken(decoded.uid, decoded.userName);
+    }
+
+    async updateLoginDates(userId: string) {
+        const userRef = admin.firestore().collection('users').doc(userId);
+        const userSnap = await userRef.get();
+        const userData = userSnap.data();
+
+        const loginDates = Array.isArray(userData?.login_dates) ? userData.login_dates : [];
+        loginDates.push(new Date().toISOString()); 
+
+        await userRef.update({
+          login_dates: loginDates, // Only JS values here!
+          last_login: admin.firestore.FieldValue.serverTimestamp(), // This is OK
+        });
     }
 }

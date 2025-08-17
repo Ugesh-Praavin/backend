@@ -1,14 +1,13 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { db } from 'src/config/firebase.config';
+import { db, admin } from 'src/config/firebase.config';
+import { PostData, CommentData } from '../../common/types/post.types';
 
 @Injectable()
 export class CommentService {
   private readonly commentsCollection = db.collection('post_comments');
   private readonly postsCollection = db.collection('posts');
 
-  /**
-   * Create a comment on a post
-   */
+
   async createComment(userId: string, postId: string, createCommentDto: any) {
     try {
       // Verify post exists
@@ -18,6 +17,9 @@ export class CommentService {
       }
 
       const postData = postDoc.data();
+      if (!postData) {
+        throw new NotFoundException('Post data not found');
+      }
       if (postData.status !== 'active') {
         throw new BadRequestException('Cannot comment on inactive post');
       }
@@ -68,14 +70,14 @@ export class CommentService {
         .offset((page - 1) * limit)
         .get();
 
-      const comments = [];
+      const comments: CommentData[] = [];
       for (const doc of snapshot.docs) {
         const commentData = doc.data();
         comments.push({
           id: doc.id,
           ...commentData,
           created_at: commentData.created_at.toISOString()
-        });
+        } as CommentData);
       }
 
       return {
@@ -102,6 +104,10 @@ export class CommentService {
       }
 
       const commentData = commentDoc.data();
+      if (!commentData) {
+        throw new NotFoundException('Comment data not found');
+      }
+
       if (commentData.author_id !== userId) {
         throw new BadRequestException('You can only edit your own comments');
       }
@@ -138,11 +144,15 @@ export class CommentService {
       }
 
       const commentData = commentDoc.data();
+      if (!commentData) {
+        throw new NotFoundException('Comment data not found');
+      }
+
       if (commentData.author_id !== userId) {
         throw new BadRequestException('You can only delete your own comments');
       }
 
-      // Soft delete
+      // Soft delete - mark as deleted instead of removing
       await this.commentsCollection.doc(commentId).update({
         status: 'deleted',
         updated_at: new Date()
@@ -173,39 +183,52 @@ export class CommentService {
       }
 
       const commentData = commentDoc.data();
+      if (!commentData) {
+        throw new NotFoundException('Comment data not found');
+      }
+
       if (commentData.status !== 'active') {
         throw new BadRequestException('Cannot like inactive comment');
       }
 
       // Check if user already liked this comment
-      const likeDoc = await db.collection('comment_likes')
-        .where('comment_id', '==', commentId)
-        .where('user_id', '==', userId)
-        .limit(1)
+      const existingLike = await this.commentsCollection
+        .doc(commentId)
+        .collection('likes')
+        .doc(userId)
         .get();
 
-      if (likeDoc.empty) {
-        // Add like
-        await db.collection('comment_likes').add({
-          comment_id: commentId,
-          user_id: userId,
-          created_at: new Date()
-        });
+      if (existingLike.exists) {
+        // Unlike - remove the like
+        await this.commentsCollection
+          .doc(commentId)
+          .collection('likes')
+          .doc(userId)
+          .delete();
 
-        await this.commentsCollection.doc(commentId).update({
-          likes_count: (commentData.likes_count || 0) + 1
-        });
-
-        return { liked: true, message: 'Comment liked' };
-      } else {
-        // Remove like
-        await likeDoc.docs[0].ref.delete();
-
+        // Decrease like count
         await this.commentsCollection.doc(commentId).update({
           likes_count: Math.max(0, (commentData.likes_count || 0) - 1)
         });
 
-        return { liked: false, message: 'Comment unliked' };
+        return { message: 'Comment unliked successfully', liked: false };
+      } else {
+        // Like - add the like
+        await this.commentsCollection
+          .doc(commentId)
+          .collection('likes')
+          .doc(userId)
+          .set({
+            user_id: userId,
+            created_at: new Date()
+          });
+
+        // Increase like count
+        await this.commentsCollection.doc(commentId).update({
+          likes_count: (commentData.likes_count || 0) + 1
+        });
+
+        return { message: 'Comment liked successfully', liked: true };
       }
     } catch (error) {
       console.error('Error toggling comment like:', error);
