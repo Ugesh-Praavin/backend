@@ -8,20 +8,25 @@ import {
   Request,
 } from '@nestjs/common';
 import { GroupService } from './group.service';
+import { GroupCleanupService } from './group-cleanup.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
 import { SendMessageDto } from './dto/send-message.dto';
-import { AuthGuard } from '@nestjs/passport';
+import { JwtAuthGuard } from '../../common/guards/auth.guard';
 
 @Controller('groups')
-@UseGuards(AuthGuard('firebase')) // Ensure you're using the correct strategy name
+@UseGuards(JwtAuthGuard)
 export class GroupController {
-  constructor(private readonly groupService: GroupService) {}
+  constructor(
+    private readonly groupService: GroupService,
+    private readonly groupCleanupService: GroupCleanupService,
+  ) {}
 
   // Create a new group
   @Post()
-  async createGroup(@Body() createGroupDto: CreateGroupDto) {
-    return this.groupService.createGroup(createGroupDto);
+  async createGroup(@Request() req: any, @Body() createGroupDto: CreateGroupDto) {
+    const userId = req.user.uid;
+    return this.groupService.createGroup(userId, createGroupDto);
   }
 
   // Join a group
@@ -71,5 +76,69 @@ export class GroupController {
   async autoJoinMoodGroup(@Request() req: any, @Param('moodType') moodType: string) {
     const userId = req.user.uid;
     return this.groupService.autoJoinMoodGroup(userId, moodType);
+  }
+
+  // Manual cleanup of expired groups (admin function)
+  @Post('cleanup/expired')
+  async cleanupExpiredGroups() {
+    const result = await this.groupCleanupService.manualCleanup();
+    return {
+      message: 'Cleanup completed successfully',
+      ...result
+    };
+  }
+
+  // Get cleanup statistics
+  @Get('cleanup/stats')
+  async getCleanupStats() {
+    return this.groupCleanupService.getCleanupStats();
+  }
+
+  // Get groups that are expiring soon
+  @Get('expiring-soon')
+  async getGroupsExpiringSoon() {
+    return this.groupService.getGroupsExpiringSoon(1); // Within 1 hour
+  }
+
+  // Check if a specific group is expired
+  @Get(':groupId/expired')
+  async isGroupExpired(@Param('groupId') groupId: string) {
+    const isExpired = await this.groupService.isGroupExpired(groupId);
+    return { 
+      groupId, 
+      isExpired,
+      message: isExpired ? 'Group has expired' : 'Group is still active'
+    };
+  }
+
+  // Change user's anonymous name in a group
+  @Post(':groupId/change-name')
+  async changeAnonymousName(@Request() req: any, @Param('groupId') groupId: string) {
+    const userId = req.user.uid;
+    return this.groupService.changeAnonymousName(userId, groupId);
+  }
+
+  // Get available anonymous names in a group
+  @Get(':groupId/anonymous-names')
+  async getAvailableAnonymousNames(@Param('groupId') groupId: string) {
+    const names = await this.groupService.getAvailableAnonymousNames(groupId);
+    return {
+      groupId,
+      anonymousNames: names,
+      count: names.length
+    };
+  }
+
+  // Get user's current anonymous name in a group
+  @Get(':groupId/my-anonymous-name')
+  async getUserAnonymousName(@Request() req: any, @Param('groupId') groupId: string) {
+    const userId = req.user.uid;
+    const anonymousName = await this.groupService.getUserAnonymousName(userId, groupId);
+    return {
+      groupId,
+      userId,
+      anonymousName,
+      hasAnonymousName: !!anonymousName
+    };
   }
 }

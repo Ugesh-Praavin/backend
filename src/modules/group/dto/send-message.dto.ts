@@ -1,10 +1,12 @@
-import { IsString, IsNumber, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, MaxLength } from 'class-validator';
 
 export class SendMessageDto {
-  @IsNumber()
-  group_id: number;
+  @IsString()
+  @IsNotEmpty()
+  group_id: string;
 
   @IsString()
+  @IsNotEmpty()
   @MaxLength(100)
   message: string;
 }

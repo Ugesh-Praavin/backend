@@ -62,6 +62,24 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('login-stats')
+  async getUserLoginStats(@Request() req) {
+    return this.authService.getUserLoginStats(req.user.uid);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('login-history')
+  async getUserLoginHistory(@Request() req) {
+    return this.authService.getUserLoginHistory(req.user.uid);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('calendar')
+  async getUserCalendarData(@Request() req) {
+    return this.authService.getUserCalendarData(req.user.uid);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post('validate-token')
   async validateToken(@Request() req) {
     return {

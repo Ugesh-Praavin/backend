@@ -1,6 +1,7 @@
-import { IsNumber } from 'class-validator';
+import { IsString, IsNotEmpty } from 'class-validator';
 
 export class JoinGroupDto {
-  @IsNumber()
-  group_id: number;
+  @IsString()
+  @IsNotEmpty()
+  group_id: string;
 }

@@ -1,13 +1,30 @@
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
-import { constrainedMemory } from "process";
-
+import { ValidationPipe } from "@nestjs/common";
+import { envConfig } from "./config/env.config";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.enableCors(); 
-  await app.listen(5000, "0.0.0.0"); 
-  console.log("Server is running on http://localhost:5000");
+  
+  // Enable CORS
+  app.enableCors({
+    origin: envConfig.CORS_ORIGIN,
+    credentials: envConfig.CORS_CREDENTIALS,
+  });
+  
+  // Global validation pipe
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }));
+  
+  // Global prefix
+  app.setGlobalPrefix('api');
+  
+  await app.listen(envConfig.PORT, envConfig.HOST); 
+  console.log("🚀 Server is running on http://localhost:" + envConfig.PORT);
+  console.log("📚 API Documentation: http://localhost:" + envConfig.PORT + "/api");
+  console.log("🌍 Environment: " + envConfig.NODE_ENV);
 }
-
 bootstrap();
