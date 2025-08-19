@@ -43,27 +43,30 @@ export class PostService {
    */
   async getAllPosts(page: number = 1, limit: number = 20, category?: string, mood?: string) {
     try {
+      console.log('getAllPosts called with:', { page, limit, category, mood });
       let query = this.postsCollection
         .where('status', '==', 'active')
         .orderBy('created_at', 'desc');
 
       if (category) {
+        console.log('Filtering by category:', category, typeof category);
         query = query.where('category', '==', category);
       }
       if (mood) {
+        console.log('Filtering by mood:', mood, typeof mood);
         query = query.where('mood', '==', mood);
       }
 
       const snapshot = await query.limit(limit).offset((page - 1) * limit).get();
-      
+
       const posts: PostData[] = [];
       for (const doc of snapshot.docs) {
         const postData = doc.data();
         posts.push({
           id: doc.id,
           ...postData,
-          created_at: postData.created_at.toISOString(),
-          updated_at: postData.updated_at.toISOString()
+          created_at: postData.created_at?.toDate ? postData.created_at.toDate().toISOString() : postData.created_at,
+          updated_at: postData.updated_at?.toDate ? postData.updated_at.toDate().toISOString() : postData.updated_at
         } as PostData);
       }
 
@@ -76,6 +79,9 @@ export class PostService {
       };
     } catch (error) {
       console.error('Error fetching posts:', error);
+      if (error && error.message) {
+        console.error('Firestore error message:', error.message);
+      }
       throw new BadRequestException('Failed to fetch posts');
     }
   }
