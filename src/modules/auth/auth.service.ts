@@ -42,6 +42,7 @@ export class AuthService {
       await admin.firestore().collection('users').doc(uid).set({
         userName,
         password: hashedPassword,
+        community: "rit_chennai", // Default community for new users
         createdAt: now,
         first_login_date: now,
         last_login_date: now,

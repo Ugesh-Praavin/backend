@@ -4,6 +4,7 @@ export interface PostData {
   content: string;
   mood: string;
   category: string;
+  community: string; // Community field for filtering
   created_at: any;
   updated_at: any;
   likes_count: number;

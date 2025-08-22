@@ -7,9 +7,10 @@ import { SessionMiddleware } from './common/middleware/session.middleware';
 import { ErrorInterceptor } from './common/interceptors/error.interceptor';
 import { GroupModule } from './modules/group/group.module';
 import { PostModule } from './modules/post/post.module';
+import { ChatModule } from './modules/chat/chat.module';
 
 @Module({
-  imports: [AuthModule, UserModule, GroupModule, PostModule],
+  imports: [AuthModule, UserModule, GroupModule, PostModule, ChatModule],
   providers: [
     {
       provide: APP_INTERCEPTOR,

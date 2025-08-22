@@ -42,6 +42,23 @@ CORS_CREDENTIALS=false
 1. Place your `firebase-adminsdk.json` file in the backend directory
 2. Ensure the service account has Firestore read/write permissions
 
+### Firestore Composite Indexes
+If you see an error like:
+
+```
+Error: 9 FAILED_PRECONDITION: The query requires an index.
+```
+
+Do this:
+
+1) Check server logs – Firestore usually prints a console URL to create the missing index.
+2) Open the provided link and create the index in Firebase Console.
+3) Re-run the request after the index builds.
+
+Notes:
+- When filtering only by `community`, the backend uses a simple `.where('community','==',community)` query to avoid unnecessary index requirements.
+- Combining multiple filters (e.g., community + status + orderBy) often requires a composite index.
+
 ## API Endpoints
 
 ### Authentication

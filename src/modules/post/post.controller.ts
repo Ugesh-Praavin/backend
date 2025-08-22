@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param, Query, Request, UseGua
 import { PostService } from './post.service';
 import { CommentService } from './comment.service';
 import { SupportService } from './support.service';
+import { CreateSupportMessageDto } from './dto/create-support-message.dto';
 import { JwtAuthGuard } from '../../common/guards/auth.guard';
 import { CreatePostDto } from './dto/create-post.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
@@ -21,21 +22,28 @@ export class PostController {
 
   @Post()
   async createPost(@Request() req: any, @Body() createPostDto: CreatePostDto) {
-    return this.postService.createPost(req.user.uid, createPostDto);
+    const userCommunity = (req.user as any)?.community;
+    console.log('createPost endpoint: user community from request:', userCommunity);
+    return this.postService.createPost(req.user.uid, createPostDto, userCommunity);
   }
 
   @Get()
   async getAllPosts(
+    @Request() req: any,
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '20',
+    @Query('community') community?: string,
     @Query('category') category?: string,
     @Query('mood') mood?: string,
   ) {
+    const userId = req?.user?.uid;
     return this.postService.getAllPosts(
       parseInt(page),
       parseInt(limit),
+      community,
       category,
-      mood
+      mood,
+      userId
     );
   }
 
@@ -120,13 +128,13 @@ export class PostController {
 
   // ===== SUPPORT ENDPOINTS =====
 
+  // New support message endpoint (anonymous)
   @Post(':id/support')
-  async supportPost(
+  async createSupportMessage(
     @Param('id') postId: string,
-    @Request() req: any,
-    @Body() supportPostDto: SupportPostDto,
+    @Body() body: CreateSupportMessageDto,
   ) {
-    return this.supportService.supportPost(req.user.uid, postId, supportPostDto);
+    return this.postService.addSupportMessage(postId, body.message);
   }
 
   @Delete(':id/support/:supportType')
@@ -138,9 +146,9 @@ export class PostController {
     return this.supportService.removeSupport(req.user.uid, postId, supportType);
   }
 
-  @Get(':id/support')
-  async getPostSupport(@Param('id') postId: string) {
-    return this.supportService.getPostSupportStats(postId);
+  @Get(':id/supports')
+  async getPostSupports(@Param('id') postId: string) {
+    return this.postService.getSupportMessages(postId);
   }
 
   @Get('support/my-support')
@@ -186,5 +194,12 @@ export class PostController {
       average_support_per_post: totalPosts > 0 ? (totalSupportGiven / totalPosts).toFixed(2) : 0,
       average_comments_per_post: totalPosts > 0 ? (totalComments / totalPosts).toFixed(2) : 0
     };
+  }
+
+  // ===== MIGRATION ENDPOINTS =====
+
+  @Post('migrate/community-field')
+  async migrateCommunityField() {
+    return this.postService.migrateCommunityField();
   }
 }
